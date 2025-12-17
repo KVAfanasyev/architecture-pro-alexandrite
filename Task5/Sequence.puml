@@ -1,0 +1,38 @@
+@startuml
+actor "Оператор" as Operator
+participant "MES" as MES
+participant "API MES" as API
+participant "Кеш (Redis)" as Cache
+participant "БД MES" as DB
+participant "Message Queue" as MQ
+participant "API CRM" as CRM_API
+
+== Чтение списка заказов ==
+
+Operator -> MES: Открывает список заказов
+MES -> API: GET /orders?status=NEW
+API -> Cache: Проверяет кеш по ключу "orders:NEW:page1"
+alt кеш найден
+    Cache --> API: Возвращает заказы из кеша
+    API --> MES: Возвращает список заказов
+else кеш отсутствует
+    API -> DB: Запрос списка заказов
+    DB --> API: Результат
+    API -> Cache: Сохраняет в кеш с TTL=30s
+    API --> MES: Возвращает список заказов
+end
+MES --> Operator: Отображает заказы
+
+== Изменение статуса заказа ==
+
+Operator -> MES: Меняет статус заказа на MANUFACTURING_STARTED
+MES -> API: PATCH /orders/{id}/status
+API -> DB: Обновляет статус
+DB --> API: OK
+API -> Cache: Удаляет кеши "orders:*" (инвалидация по ключу)
+API -> MQ: Отправляет сообщение о смене статуса
+MQ -> CRM_API: Получает сообщение
+CRM_API -> CRM_API: Обновляет статус в CRM
+API --> MES: Статус обновлён
+MES --> Operator: Подтверждение
+@enduml

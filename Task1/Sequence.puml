@@ -1,0 +1,104 @@
+@startuml
+title Последовательность обработки заказа (Целевая архитектура через 6 месяцев)
+
+actor Customer as customer
+participant "SPA\nOnline Shop" as spa_shop
+participant "API Gateway" as api_gateway
+participant "Order Service\n(бывший Shop/CRM API)" as order_service
+participant "Pricing Service\n(выделен из MES)" as pricing_service
+participant "Manufacturing Service\n(бывший MES API)" as manufacturing_service
+participant "Notification Service" as notification_service
+database "Order DB" as order_db
+database "MES DB" as mes_db
+queue "Event Bus\n(RabbitMQ)" as event_bus
+participant "External Partner API" as external_api
+
+' ==================== 1. Создание заказа (B2C) ====================
+group "1. Создание заказа покупателем (B2C)"
+  customer -> spa_shop : Создает 3D-модель/загружает файл
+  spa_shop -> api_gateway : POST /api/orders (с моделью)
+  api_gateway -> order_service : Создать заказ
+  order_service -> order_db : Сохранить заказ (статус: FILE_UPLOADED)
+  order_service --> order_service : Генерирует Correlation ID
+  order_service --> api_gateway : 202 Accepted + Order ID + Correlation ID
+  api_gateway --> spa_shop : 202 Accepted
+  spa_shop --> customer : "Заказ принят, расчет начат"
+
+  ' Асинхронный расчет стоимости
+  order_service -> event_bus : Publish: OrderCreated(orderId, fileUrl, correlationId)
+  event_bus -> pricing_service : Subscribe: OrderCreated
+  pricing_service -> pricing_service : Запуск расчета стоимости (async)
+
+  group Асинхронная обработка (параллельно)
+    pricing_service -> pricing_service : Расчет стоимости (2-30 мин)
+    pricing_service -> order_service : PUT /api/orders/{id}/price (цена)
+    order_service -> order_db : Обновить заказ (цена, статус: PRICE_CALCULATED)
+    order_service -> event_bus : Publish: PriceCalculated(orderId, price, correlationId)
+    event_bus -> notification_service : Subscribe: PriceCalculated
+    notification_service -> customer : Email: "Стоимость рассчитана"
+    event_bus -> order_service : Subscribe: PriceCalculated
+  end group
+end
+
+' ==================== 2. Подтверждение продавцом ====================
+group "2. Подтверждение заказа продавцом (CRM)"
+  order_service -> order_db : Обновить статус (MANUFACTURING_APPROVED)
+  order_service -> event_bus : Publish: OrderApproved(orderId, correlationId)
+  event_bus -> manufacturing_service : Subscribe: OrderApproved
+  manufacturing_service -> mes_db : Создать производственное задание
+  manufacturing_service -> notification_service : Send: TaskCreated
+  notification_service -> customer : Email: "Заказ передан в производство"
+end
+
+' ==================== 3. Производство ====================
+group "3. Работа оператора"
+  manufacturing_service -> manufacturing_service : Оператор берет задание
+  manufacturing_service -> mes_db : Обновить статус (MANUFACTURING_STARTED)
+  manufacturing_service -> event_bus : Publish: ManufacturingStarted(orderId, operatorId, correlationId)
+
+  manufacturing_service -> manufacturing_service : Изготовление изделия
+  manufacturing_service -> mes_db : Обновить статус (MANUFACTURING_COMPLETED)
+  manufacturing_service -> event_bus : Publish: ManufacturingCompleted(orderId, correlationId)
+
+  manufacturing_service -> manufacturing_service : Упаковка
+  manufacturing_service -> mes_db : Обновить статус (PACKAGING → SHIPPED)
+  manufacturing_service -> event_bus : Publish: OrderShipped(orderId, trackingNumber, correlationId)
+
+  event_bus -> notification_service : Subscribe: OrderShipped
+  notification_service -> customer : Email: "Заказ отправлен"
+end
+
+' ==================== 4. Завершение ====================
+group "4. Завершение заказа"
+  order_service -> order_service : Получение подтверждения от ТК
+  order_service -> order_db : Обновить статус (CLOSED)
+  order_service -> event_bus : Publish: OrderClosed(orderId, correlationId)
+
+  event_bus -> notification_service : Subscribe: OrderClosed
+  notification_service -> customer : Email: "Заказ получен, спасибо!"
+
+  event_bus -> manufacturing_service : Subscribe: OrderClosed
+  manufacturing_service -> mes_db : Обновить статус задания (COMPLETED)
+end
+
+' ==================== 5. B2B сценарий ====================
+group "5. B2B-сценарий (Внешний партнер)" [optional]
+  external_api -> api_gateway : POST /api/v1/partner/orders (с моделью)
+  api_gateway -> order_service : Создать заказ от партнера
+  order_service -> order_db : Сохранить заказ (источник: API_PARTNER)
+
+  Note over order_service, pricing_service : Далее тот же процесс расчета и производства
+  order_service -> event_bus : Publish: OrderCreated(orderId, fileUrl, correlationId)
+  event_bus -> pricing_service : Subscribe: OrderCreated
+
+  order_service -> external_api : 202 Accepted + Order ID + Correlation ID
+end
+
+' ==================== Мониторинг ====================
+group "6. Мониторинг (Distributed Tracing)" [hidden]
+  Note over order_service, pricing_service : Все вызовы передают Correlation ID
+  Note over order_service, pricing_service : Jaeger/Zipkin отслеживают полный путь заказа
+  Note over order_service, pricing_service : Дашборд для админов: статусы из всех систем
+end
+
+@enduml

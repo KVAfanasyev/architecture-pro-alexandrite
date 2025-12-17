@@ -1,0 +1,39 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(customer, "Customer", "User can make an order, upload 3d model, work in 3d editor")
+Person(seller, "Seller", "Operates with order, confirms manufacturing for the user")
+Person(api_user, "API user", "Description of external person.")
+Person(operator, "Operator", "Takes order in work, manufactures jewelry")
+
+System_Boundary(JewerlyStoreSystem, "Jewerly Store System") {
+    Container(spa_shop, "Internet Shop", "Vue, TypeScript, Threejs", "User can make an order, upload 3d model, work in 3d editor")
+    Container(api_shop, "Shop API", "SpringBoot", "- provide list of shop items\n- receives user generated or uploaded 3d file\n- save information about order from customer perspective")
+    ContainerDb(db_shop, "Shop DB", "PostgreSQL", "Holds main information about work with customers and its orders")
+    Container(spa_crm, "CRM", "Vue, Typescript", "Description of web browser container role/responsibility.")
+    Container(api_crm, "CRM API", "SpringBoot", "Description of container role/responsibility.")
+    Container(spa_mes, "MES", "React, typescript", "provide interface to assign orders on operators, shows list of orders")
+    Container(api_mes, "MES API", "C#", "- Assigns orders on operators\n- Shows list of orders\n- Calculates price of the order")
+    ContainerDb(db_mes, "MES db", "PostgreSQL", "Holds information about orders, its assignments on operators and statuses from MES perspective")
+    Container(storage_3d, "3d files storage", "S3-based storage", "stores 3d files so that can be calculated")
+    ContainerQueue(mq, "Messages Queue", "RabbitMQ", "Send messages about new orders, changes of statuses between containers, has several topics")
+}
+
+Rel(customer, spa_shop, "Uses")
+Rel(seller, spa_crm, "Uses")
+Rel(api_user, api_mes, "Uses")
+Rel(operator, spa_mes, "Uses")
+
+Rel(spa_shop, api_shop, "Makes API calls")
+Rel(api_shop, db_shop, "Reads/Writes")
+Rel(api_shop, storage_3d, "uploads files")
+Rel(spa_crm, api_crm, "Makes API calls")
+Rel(api_crm, db_shop, "Reads/Writes")
+Rel(api_crm, mq, "Sends messages")
+Rel(spa_mes, api_mes, "Makes API calls")
+Rel(api_mes, db_mes, "Reads/Writes")
+Rel(api_mes, storage_3d, "Reads files")
+Rel(api_mes, mq, "Sends/receives messages")
+
+
+@enduml
