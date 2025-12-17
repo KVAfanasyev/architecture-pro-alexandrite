@@ -1,0 +1,109 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(customer, "Customer", "Клиент интернет-магазина")
+Person(seller, "Seller", "Оператор заказов, подтверждает изготовление")
+Person(operator, "Operator", "Изготавливает изделия, принимает заказ в работу")
+Person(api_user, "API user", "Внешний пользователь API")
+Person(support_team, "Support Team", "Мониторинг системы, анализ инцидентов через трассировку и логи")
+
+System_Boundary(jewerly_system, "Jewerly Store System") {
+    Container(spa_shop, "Internet Shop", "Vue, TypeScript, Threejs", "Клиентский интерфейс: оформление заказа, загрузка 3D-моделей, 3D-редактор")
+
+    Container(spa_mes, "MES", "React, TypeScript", "Интерфейс для назначения заказов операторам, список заказов")
+
+    Container(spa_crm, "CRM", "Vue, TypeScript", "Управление взаимоотношениями с клиентами")
+
+    Container(api_shop, "Shop API", "SpringBoot", "API магазина: список товаров, прием 3D-файлов, сохранение информации о заказах")
+
+    Container(api_crm, "CRM API", "SpringBoot", "API для CRM-системы")
+
+    Container(api_mes, "MES API", "C#", "API MES: назначение заказов операторам, список заказов, расчет стоимости")
+
+    ContainerDb(db_shop, "Shop DB", "PostgreSQL", "Основная информация о клиентах и их заказах")
+
+    ContainerDb(db_mes, "MES db", "PostgreSQL", "Информация о заказах, назначениях операторам и статусах с точки зрения MES")
+
+    Container(s3_storage, "3d files storage", "S3-based storage", "Хранилище 3D-файлов для расчетов")
+
+    Container(message_queue, "Messages Queue", "RabbitMQ", "Обмен сообщениями о новых заказах, изменениях статусов между контейнерами")
+
+    Container(otel_backend, "Tracing & Monitoring Backend", "Jaeger, Grafana, Prometheus", "Сбор, хранение и визуализация трассировок и метрик. Оповещения.")
+
+    Container(alert_manager, "Alert Manager", "", "Менеджер оповещений")
+
+    Container(otel_collector1, "OTel Collector", "", "Сборщик телеметрии")
+    Container(otel_collector2, "OTel Collector", "", "Сборщик телеметрии")
+    Container(otel_collector3, "OTel Collector", "", "Сборщик телеметрии")
+    Container(otel_collector4, "OTel Collector", "", "Сборщик телеметрии")
+
+    ' --- НОВЫЕ КОМПОНЕНТЫ ДЛЯ ЛОГИРОВАНИЯ ---
+    Container(log_collector, "Log Collector", "Fluentd", "Сбор и агрегация логов со всех систем")
+
+    Container(log_storage, "Log Storage", "Elasticsearch", "Централизованное хранение структурированных логов")
+
+    Container(log_visualization, "Log Visualization", "Kibana", "Дашборды, поиск и анализ логов")
+
+    Container(log_processing, "Log Processing", "Logstash", "Обработка, обогащение и трансформация логов")
+}
+
+' --- Взаимодействия между людьми и системами ---
+Rel(customer, spa_shop, "Просматривает товары, оформляет заказы", "HTTPS")
+Rel(seller, spa_crm, "Управляет заказами, подтверждает изготовление", "HTTPS")
+Rel(operator, spa_mes, "Принимает заказы в работу, отслеживает статусы", "HTTPS")
+Rel(api_user, api_mes, "Использует API для интеграций", "API")
+Rel(support_team, otel_backend, "Мониторит систему, анализирует трассировки", "HTTPS")
+Rel(support_team, log_visualization, "Анализирует логи, ищет причины проблем", "HTTPS")
+Rel(alert_manager, support_team, "Отправляет оповещения", "HTTPS")
+
+' --- Взаимодействия между фронтендом и бэкендом ---
+Rel(spa_shop, api_shop, "Запросы данных, отправка заказов", "HTTPS")
+Rel(spa_crm, api_crm, "Взаимодействие с CRM-данными", "HTTPS")
+Rel(spa_mes, api_mes, "Управление заказами и операторами", "HTTPS")
+
+' --- Взаимодействия между API и базами данных ---
+Rel(api_shop, db_shop, "Чтение/запись данных о заказах и клиентах", "JDBC")
+Rel(api_crm, db_shop, "Чтение/запись CRM-данных", "JDBC")
+Rel(api_mes, db_mes, "Чтение/запись данных MES", "JDBC")
+
+' --- Взаимодействия с хранилищем 3D-файлов ---
+Rel(api_shop, s3_storage, "Сохраняет загруженные 3D-файлы", "HTTPS")
+Rel(api_mes, s3_storage, "Читает 3D-файлы для расчетов", "HTTPS")
+
+' --- Взаимодействия через очередь сообщений ---
+Rel(api_crm, message_queue, "Отправка сообщений о новых заказах", "AMQP")
+Rel(api_mes, message_queue, "Чтение сообщений, отправка статусов", "AMQP")
+
+' --- Мониторинг и трассировка ---
+Rel(api_shop, otel_collector1, "Отправка телеметрии", "OTLP")
+Rel(api_crm, otel_collector2, "Отправка телеметрии", "OTLP")
+Rel(message_queue, otel_collector3, "Отправка телеметрии", "OTLP")
+Rel(api_mes, otel_collector4, "Отправка телеметрии", "OTLP")
+
+Rel(otel_collector1, otel_backend, "Передача телеметрии", "OTLP")
+Rel(otel_collector2, otel_backend, "Передача телеметрии", "OTLP")
+Rel(otel_collector3, otel_backend, "Передача телеметрии", "OTLP")
+Rel(otel_collector4, otel_backend, "Передача телеметрии", "OTLP")
+
+Rel(otel_backend, alert_manager, "Триггеры для оповещений", "HTTPS")
+
+' --- НОВЫЕ СВЯЗИ ДЛЯ СИСТЕМЫ ЛОГИРОВАНИЯ ---
+Rel(api_shop, log_collector, "Отправка структурированных логов", "HTTP/JSON")
+Rel(api_crm, log_collector, "Отправка структурированных логов", "HTTP/JSON")
+Rel(api_mes, log_collector, "Отправка структурированных логов", "HTTP/JSON")
+Rel(message_queue, log_collector, "Отправка структурированных логов", "HTTP/JSON")
+Rel(spa_shop, log_collector, "Отправка логов клиентских ошибок", "HTTP/JSON")
+Rel(spa_mes, log_collector, "Отправка логов производительности", "HTTP/JSON")
+Rel(spa_crm, log_collector, "Отправка логов действий пользователей", "HTTP/JSON")
+
+Rel(log_collector, log_processing, "Передача логов для обработки", "TCP/JSON")
+Rel(log_processing, log_storage, "Сохранение обработанных логов", "HTTP/JSON")
+Rel(log_storage, log_visualization, "Предоставление данных для визуализации", "HTTP/JSON")
+
+Rel(log_processing, alert_manager, "Триггеры на основе логов (например, много ошибок)", "HTTP")
+
+' --- Связи между системами мониторинга и логирования ---
+Rel(otel_backend, log_visualization, "Корреляция метрик и логов", "HTTP")
+Rel(alert_manager, log_visualization, "Ссылки на логи из алертов", "HTTP")
+
+@enduml
